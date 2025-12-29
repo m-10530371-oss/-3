@@ -17,6 +17,7 @@ let gameOver = false;
 let revealedCells = 0; // 已经揭示的非雷单元格数量
 let flagsPlaced = 0;   // 已放置的旗帜数量
 let correctFlags = 0;  // 正确标记的雷数量
+let flagMode = false; // 新增：旗帜模式开关
 
 // --- 计时器相关 ---
 let timerInterval;
@@ -33,6 +34,16 @@ const backToMenuButton = document.getElementById('back-to-menu');
 const timerDisplay = document.getElementById('timer');
 const flagCountDisplay = document.getElementById('flag-count');
 
+// 新增：旗帜模式按钮
+const toggleFlagModeButton = document.createElement('button');
+toggleFlagModeButton.id = 'toggle-flag-mode';
+toggleFlagModeButton.textContent = '🚩 模式';
+toggleFlagModeButton.classList.add('mode-button'); // 复用样式
+toggleFlagModeButton.style.marginTop = '10px';
+// 在 game-page 中找到一个合适的位置插入按钮，例如在 game-info 下面
+gamePage.insertBefore(toggleFlagModeButton, gameContainer);
+
+
 // --- 事件监听器 ---
 modeButtons.forEach(button => {
     button.addEventListener('click', (e) => {
@@ -42,12 +53,15 @@ modeButtons.forEach(button => {
 });
 resetButton.addEventListener('click', () => startGame(currentMode.name)); // 重新开始当前模式
 backToMenuButton.addEventListener('click', showStartPage);
+toggleFlagModeButton.addEventListener('click', toggleFlagMode); // 监听旗帜模式按钮
 
 // --- 页面切换函数 ---
 function showStartPage() {
     startPage.style.display = 'flex';
     gamePage.style.display = 'none';
     stopTimer(); // 确保计时器停止
+    flagMode = false; // 返回菜单时重置旗帜模式
+    updateFlagModeButton(); // 更新按钮样式
 }
 
 function showGamePage() {
@@ -65,6 +79,8 @@ function startGame(modeName) {
 
     initGame();
     showGamePage();
+    flagMode = false; // 每次新游戏开始时，默认不是旗帜模式
+    updateFlagModeButton(); // 更新按钮样式
 }
 
 function initGame() {
@@ -104,10 +120,10 @@ function initGame() {
             cellElement.dataset.col = j;
             cellElement.style.width = `${CELL_SIZE}px`;
             cellElement.style.height = `${CELL_SIZE}px`;
-            cellElement.addEventListener('click', () => handleCellClick(i, j));
+            cellElement.addEventListener('click', () => handleCellInteraction(i, j)); // 修改为统一处理函数
             cellElement.addEventListener('contextmenu', (e) => {
                 e.preventDefault(); // 阻止默认右键菜单
-                handleCellRightClick(i, j);
+                handleCellRightClick(i, j); // 保留右键菜单功能，仅PC端有效
             });
             gameContainer.appendChild(cellElement);
         }
@@ -182,9 +198,26 @@ function updateFlagCount() {
     flagCountDisplay.textContent = `🚩 ${flagsPlaced} / ${BOOM_COUNT}`;
 }
 
-// --- 单元格交互逻辑 ---
-function handleCellClick(row, col) {
-    if (gameOver || board[row][col].isRevealed || board[row][col].isFlagged) {
+// --- 新增：切换旗帜模式 ---
+function toggleFlagMode() {
+    flagMode = !flagMode;
+    updateFlagModeButton();
+}
+
+// 新增：更新旗帜模式按钮的显示
+function updateFlagModeButton() {
+    if (flagMode) {
+        toggleFlagModeButton.textContent = '✅ 旗帜模式 (点击取消)';
+        toggleFlagModeButton.style.backgroundColor = '#28a745'; // 绿色表示激活
+    } else {
+        toggleFlagModeButton.textContent = '🚩 模式';
+        toggleFlagModeButton.style.backgroundColor = '#007bff'; // 蓝色表示非激活
+    }
+}
+
+// 新增：统一处理单元格点击事件
+function handleCellInteraction(row, col) {
+    if (gameOver || board[row][col].isRevealed) {
         return;
     }
 
@@ -193,9 +226,14 @@ function handleCellClick(row, col) {
         startTimer(); // 第一次点击才开始计时
     }
 
-    revealCell(row, col);
+    if (flagMode) {
+        toggleFlag(row, col);
+    } else {
+        revealCell(row, col);
+    }
 }
 
+// 保留右键点击，仅PC端使用
 function handleCellRightClick(row, col) {
     if (gameOver || board[row][col].isRevealed) {
         return;
@@ -222,8 +260,10 @@ function revealCell(row, col) {
 
     cell.isRevealed = true;
     cellElement.classList.add('revealed');
-    cellElement.removeEventListener('click', () => handleCellClick(row, col)); // 揭示后移除事件
+    // 揭示后移除事件监听器，避免再次点击
+    cellElement.removeEventListener('click', () => handleCellInteraction(row, col));
     cellElement.removeEventListener('contextmenu', (e) => handleCellRightClick(row, col));
+
 
     if (cell.isBomb) {
         cellElement.textContent = '💣';
@@ -276,7 +316,7 @@ function toggleFlag(row, col) {
             }
         } else {
             // 如果已经达到雷数，不允许放置更多旗帜，并恢复状态
-            cell.isFlagged = false;
+            cell.isFlagged = false; // 取消本次标记操作
         }
     } else {
         cellElement.textContent = '';
@@ -323,7 +363,7 @@ function endGame(win) {
     allCells.forEach(cell => {
         const row = parseInt(cell.dataset.row);
         const col = parseInt(cell.dataset.col);
-        cell.removeEventListener('click', () => handleCellClick(row, col));
+        cell.removeEventListener('click', () => handleCellInteraction(row, col));
         cell.removeEventListener('contextmenu', (e) => handleCellRightClick(row, col));
     });
 }
@@ -335,10 +375,10 @@ function revealAllBombs() {
             if (board[i][j].isBomb) { // 只显示是雷的单元格
                 const cellElement = gameContainer.children[i * GRID_SIZE + j];
                 // 如果是雷，但被错误地标记为旗帜，移除旗帜显示雷
-                if (board[i][j].isFlagged && !board[i][j].isBomb) {
-                    cellElement.textContent = '❌'; // 错误标记的雷
-                    cellElement.classList.remove('flag');
-                    cellElement.classList.add('revealed');
+                if (board[i][j].isFlagged && !board[i][j].isBomb) { // 实际上，如果是雷，并且被标记了，说明是正确标记
+                    cellElement.textContent = '🚩'; // 正确标记的雷保持旗帜
+                    cellElement.classList.remove('flag'); // 移除flag样式，避免覆盖
+                    cellElement.classList.add('revealed'); // 标记为已揭示状态
                 } else if (!board[i][j].isRevealed) { // 如果未被揭示
                     cellElement.textContent = '💣';
                     cellElement.classList.add('bomb');
